@@ -1,0 +1,68 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #111111;
+  --bg2: #1a1a1a;
+  --bg3: #222222;
+  --border: #2e2e2e;
+  --border2: #3a3a3a;
+  --text: #e8e8e8;
+  --text2: #888888;
+  --text3: #555555;
+  --accent: #ffffff;
+  --accent-bg: #ffffff14;
+  --danger: #f87171;
+  --danger-bg: #f8717118;
+  --success: #4ade80;
+  --success-bg: #4ade8018;
+  --warning: #fb923c;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { text-decoration: none; color: inherit; }
+button { cursor: pointer; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+::selection { background: #ffffff22; }
+
+@media print {
+  body { background: #fff; color: #000; }
+
+  aside { display: none !important; }
+
+  main { width: 100% !important; }
+
+  .no-print { display: none !important; }
+
+  .barcode-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 16px !important;
+    padding: 16px !important;
+  }
+
+  .barcode-card {
+    border: 1px solid #ddd !important;
+    border-radius: 8px !important;
+    padding: 12px !important;
+    text-align: center !important;
+    break-inside: avoid !important;
+    background: #fff !important;
+  }
+
+  .barcode-card svg { width: 100% !important; }
+
+  .barcode-card p { color: #000 !important; font-size: 12px !important; }
+}
