@@ -54,12 +54,10 @@ input, select, textarea { font-family: inherit; }
   }
 
   .barcode-card {
-    border: 1px solid #ddd !important;
-    border-radius: 8px !important;
-    padding: 12px !important;
-    text-align: center !important;
     break-inside: avoid !important;
     background: #fff !important;
+    border: none !important;
+    padding: 4px !important;
   }
 
   .barcode-card svg { width: 100% !important; }

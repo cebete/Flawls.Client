@@ -6,6 +6,7 @@ import { useLanguage } from '../context/LanguageContext'
 export default function Barcodes() {
   const [products, setProducts] = useState([])
   const [selected, setSelected] = useState('')
+  const [selectedVariants, setSelectedVariants] = useState(new Set())
   const barcodeRefs = useRef({})
   const { t } = useLanguage()
 
@@ -16,18 +17,35 @@ export default function Barcodes() {
   const product = products.find(p => p.id === parseInt(selected))
 
   useEffect(() => {
+    setSelectedVariants(new Set())
     if (!product) return
     product.variants.forEach(v => {
       const el = barcodeRefs.current[v.id]
       if (el) {
-        JsBarcode(el, v.barcodeId, {
-          format: 'CODE128', width: 2, height: 56,
-          displayValue: true, fontSize: 11, margin: 8,
-          background: 'transparent', lineColor: '#000',
-        })
+        try {
+          JsBarcode(el, v.barcodeId, {
+            format: 'EAN13', width: 2, height: 56,
+            displayValue: true, fontSize: 11, margin: 8,
+            background: 'transparent', lineColor: '#000',
+          })
+        } catch {
+          JsBarcode(el, v.barcodeId, {
+            format: 'CODE128', width: 2, height: 56,
+            displayValue: true, fontSize: 11, margin: 8,
+            background: 'transparent', lineColor: '#000',
+          })
+        }
       }
     })
   }, [product])
+
+  function toggleSelect(variantId) {
+    setSelectedVariants(prev => {
+      const next = new Set(prev)
+      next.has(variantId) ? next.delete(variantId) : next.add(variantId)
+      return next
+    })
+  }
 
   function printSingle(v) {
     const svgEl = barcodeRefs.current[v.id]
@@ -41,14 +59,51 @@ export default function Barcodes() {
           <style>
             body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, sans-serif; background: #fff; color: #000; }
             svg { width: 280px; }
-            p { font-size: 13px; margin: 4px 0 0; font-weight: 600; }
-            code { font-size: 11px; color: #666; }
           </style>
         </head>
         <body>
           ${svgHTML}
-          <p>${product.name} — ${v.color} / ${v.size}</p>
-          <code>${v.barcodeId}</code>
+          <script>window.onload = () => { window.print(); window.close() }<\/script>
+        </body>
+      </html>
+    `)
+    win.document.close()
+  }
+
+  function printSelected() {
+    if (selectedVariants.size === 0) return
+    const variants = product.variants.filter(v => selectedVariants.has(v.id))
+    const labels = variants.map(v => {
+      const svgEl = barcodeRefs.current[v.id]
+      return svgEl ? `<div class="barcode-card">${svgEl.outerHTML}</div>` : ''
+    }).join('')
+
+    const win = window.open('', '_blank')
+    win.document.write(`
+      <html>
+        <head>
+          <title>Selected Barcodes</title>
+          <style>
+            @page { margin: 16px; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { background: #fff; font-family: system-ui, sans-serif; }
+            .barcode-grid {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 16px;
+              padding: 16px;
+            }
+            .barcode-card {
+              break-inside: avoid;
+              background: #fff;
+              text-align: center;
+              padding: 12px;
+            }
+            .barcode-card svg { width: 100%; height: auto; }
+          </style>
+        </head>
+        <body>
+          <div class="barcode-grid">${labels}</div>
           <script>window.onload = () => { window.print(); window.close() }<\/script>
         </body>
       </html>
@@ -60,9 +115,16 @@ export default function Barcodes() {
     <div style={s.page}>
       <div style={s.pageHeader} className="no-print">
         <h2 style={s.title}>{t('barcodes')}</h2>
-        {product && (
-          <button style={s.btnGhost} onClick={() => window.print()}>{t('printAll')}</button>
-        )}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {selectedVariants.size > 0 && (
+            <button style={s.btnPrimary} onClick={printSelected}>
+              Print selected ({selectedVariants.size})
+            </button>
+          )}
+          {product && (
+            <button style={s.btnGhost} onClick={() => window.print()}>{t('printAll')}</button>
+          )}
+        </div>
       </div>
 
       <div style={s.card} className="no-print">
@@ -77,18 +139,35 @@ export default function Barcodes() {
         <>
           <p style={s.printTitle}>{product.name}</p>
           <div className="barcode-grid" style={s.grid}>
-            {product.variants.map(v => (
-              <div key={v.id} className="barcode-card" style={s.barcodeCard}>
-                <svg ref={el => barcodeRefs.current[v.id] = el} style={{ width: '100%' }} />
-                <div style={s.variantInfo}>
-                  <span style={s.variantLabel}>{v.color} / {v.size}</span>
-                  <code style={s.variantCode}>{v.barcodeId}</code>
+            {product.variants.map(v => {
+              const isSelected = selectedVariants.has(v.id)
+              return (
+                <div
+                  key={v.id}
+                  className="barcode-card"
+                  style={{
+                    ...s.barcodeCard,
+                    border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => toggleSelect(v.id)}
+                >
+                  <div style={{ pointerEvents: 'none' }}>
+                    <svg ref={el => barcodeRefs.current[v.id] = el} style={{ width: '100%' }} />
+                  </div>
+                  {isSelected && (
+                    <div style={s.selectedBadge}>✓</div>
+                  )}
+                  <button
+                    className="no-print"
+                    style={s.printSingleBtn}
+                    onClick={e => { e.stopPropagation(); printSingle(v) }}
+                  >
+                    {t('print')}
+                  </button>
                 </div>
-                <button className="no-print" style={s.printSingleBtn} onClick={() => printSingle(v)}>
-                  {t('print')}
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </>
       )}
@@ -109,11 +188,10 @@ const s = {
   select: { padding: '8px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '7px', fontSize: '13px', color: 'var(--text)', width: '320px', outline: 'none' },
   printTitle: { fontSize: '14px', fontWeight: '600', marginBottom: '1rem', display: 'none' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' },
-  barcodeCard: { background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '10px', padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  variantInfo: { marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '3px', width: '100%' },
-  variantLabel: { fontSize: '13px', fontWeight: '500', color: 'var(--text)' },
-  variantCode: { fontSize: '11px', color: 'var(--text3)', fontFamily: 'monospace' },
+  barcodeCard: { background: 'var(--bg2)', borderRadius: '10px', padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', transition: 'border-color 0.15s' },
+  selectedBadge: { position: 'absolute', top: '8px', right: '8px', width: '20px', height: '20px', background: 'var(--accent)', color: '#111', borderRadius: '50%', fontSize: '11px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   printSingleBtn: { marginTop: '10px', width: '100%', padding: '6px 0', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '12px', color: 'var(--text2)' },
   btnGhost: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', fontSize: '13px', color: 'var(--text2)' },
+  btnPrimary: { padding: '8px 16px', background: 'var(--accent)', color: '#111', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: '600' },
   empty: { padding: '3rem', textAlign: 'center', color: 'var(--text3)', fontSize: '13px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '10px' },
 }

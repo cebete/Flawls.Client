@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:developer.loyverse.com)",
+      "WebFetch(domain:api.loyverse.com)"
+    ]
+  }
+}

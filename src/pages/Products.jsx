@@ -8,6 +8,22 @@ import { useLanguage } from '../context/LanguageContext'
 const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size']
 const emptyVariant = () => ({ color: '', size: 'S', initialQuantity: 0 })
 
+function ChevronDown() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 5L7 9L11 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
+function ChevronRight() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M5 3L9 7L5 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 export default function Products() {
   const [products, setProducts] = useState([])
   const [showForm, setShowForm] = useState(false)
@@ -23,6 +39,12 @@ export default function Products() {
   const [filterCategory, setFilterCategory] = useState('')
   const [historyVariant, setHistoryVariant] = useState(null)
   const [duplicating, setDuplicating] = useState(null)
+  const [editingProduct, setEditingProduct] = useState(null)
+  const [editForm, setEditForm] = useState({})
+  const [editSaving, setEditSaving] = useState(false)
+  const [addingVariant, setAddingVariant] = useState(null)
+  const [newVariant, setNewVariant] = useState({ color: '', size: 'S', initialQuantity: 0 })
+  const [collapsedProducts, setCollapsedProducts] = useState({})
   const { t } = useLanguage()
 
   function addToast(message, type) {
@@ -33,9 +55,20 @@ export default function Products() {
     setToasts(prev => prev.filter(t => t.id !== id))
   }
 
+  function toggleCollapse(id) {
+    setCollapsedProducts(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
   async function load() {
     const res = await client.get('/products')
     setProducts(res.data)
+    setCollapsedProducts(prev => {
+      const next = { ...prev }
+      res.data.forEach(p => {
+        if (!(p.id in next)) next[p.id] = true
+      })
+      return next
+    })
   }
 
   useEffect(() => { load() }, [])
@@ -96,6 +129,63 @@ export default function Products() {
     }
   }
 
+  function startEdit(p) {
+    setEditingProduct(p.id)
+    setEditForm({
+      name: p.name,
+      category: p.category || '',
+      costPrice: p.costPrice,
+      sellingPrice: p.sellingPrice,
+      imageUrl: p.imageUrl || '',
+      notes: p.notes || '',
+      lowStockThreshold: p.lowStockThreshold || null,
+    })
+  }
+
+  async function saveEdit(id) {
+    setEditSaving(true)
+    try {
+      await client.put(`/products/${id}`, {
+        ...editForm,
+        costPrice: parseFloat(editForm.costPrice) || 0,
+        sellingPrice: parseFloat(editForm.sellingPrice) || 0,
+        lowStockThreshold: editForm.lowStockThreshold ?? 0,
+      })
+      setEditingProduct(null)
+      addToast(t('productSaved'), 'success')
+      load()
+    } catch {
+      addToast(t('failedSave'), 'error')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  async function saveNewVariant(productId) {
+    try {
+      await client.post(`/variants/product/${productId}`, {
+        color: newVariant.color.trim(),
+        size: newVariant.size,
+        initialQuantity: parseInt(newVariant.initialQuantity) || 0,
+      })
+      setAddingVariant(null)
+      setNewVariant({ color: '', size: 'S', initialQuantity: 0 })
+      addToast('Variant added.', 'success')
+      load()
+    } catch {
+      addToast('Failed to add variant.', 'error')
+    }
+  }
+
+  async function uploadImage(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await client.post('/images', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    return `http://localhost:5000${res.data.url}`
+  }
+
   async function adjustStock(variantId, delta) {
     await client.patch(`/variants/${variantId}/stock`, { delta, reason: 'manual' })
     load()
@@ -120,6 +210,60 @@ export default function Products() {
     URL.revokeObjectURL(url)
   }
 
+  function exportLoyverseCSV() {
+    const headers = [
+      'Handle', 'SKU', 'Name', 'Category', 'Description', 'Sold by weight',
+      'Option 1 name', 'Option 1 value', 'Option 2 name', 'Option 2 value',
+      'Option 3 name', 'Option 3 value', 'Cost', 'Barcode',
+      'SKU of included item', 'Quantity of included item', 'Track stock',
+      'Available for sale [FLAWLS ESPAÑA S.L.]', 'Price [FLAWLS ESPAÑA S.L.]',
+      'In stock [FLAWLS ESPAÑA S.L.]', 'Low stock [FLAWLS ESPAÑA S.L.]',
+      'Tax - "IVA" (21%)'
+    ]
+    const rows = [headers]
+    products.forEach(p => {
+      p.variants.forEach(v => {
+        rows.push([
+          p.id,
+          v.barcodeId,
+          p.name,
+          p.category || '',
+          p.notes || '',
+          'N',
+          v.color ? 'Color' : '',
+          v.color || '',
+          v.size ? 'Size' : '',
+          v.size || '',
+          '', '',
+          p.costPrice.toFixed(2),
+          v.barcodeId,
+          '', '',
+          'Y',
+          'Y',
+          p.sellingPrice.toFixed(2),
+          v.quantity,
+          p.lowStockThreshold || '',
+          'Y',
+        ])
+      })
+    })
+    const csvCell = cell => {
+      const str = String(cell)
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"'
+      }
+      return str
+    }
+    const csv = rows.map(r => r.map(csvCell).join(',')).join('\n')
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `loyverse-import-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))]
 
   const filtered = products.filter(p => {
@@ -137,6 +281,7 @@ export default function Products() {
       <div style={s.pageHeader}>
         <h2 style={s.title}>{t('products')}</h2>
         <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={s.btnGhost} onClick={exportLoyverseCSV}>{t('exportLoyverseCSV')}</button>
           <button style={s.btnGhost} onClick={exportCSV}>{t('exportCSV')}</button>
           <button style={showForm ? s.btnGhost : s.btnPrimary} onClick={() => setShowForm(v => !v)}>
             {showForm ? t('cancel') : t('addProduct')}
@@ -209,7 +354,22 @@ export default function Products() {
               </div>
               <div style={s.col}>
                 <label style={s.label}>{t('imageUrl')}</label>
-                <input style={s.input} value={form.imageUrl} onChange={e => setForm(f => ({ ...f, imageUrl: e.target.value }))} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ fontSize: '13px', color: 'var(--text2)' }}
+                    onChange={async e => {
+                      const file = e.target.files[0]
+                      if (!file) return
+                      const url = await uploadImage(file)
+                      setForm(f => ({ ...f, imageUrl: url }))
+                    }}
+                  />
+                  {form.imageUrl && (
+                    <img src={form.imageUrl} style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }} />
+                  )}
+                </div>
                 <label style={s.label}>{t('notes')}</label>
                 <textarea style={{ ...s.input, minHeight: '90px', resize: 'vertical' }} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
@@ -275,59 +435,174 @@ export default function Products() {
         ) : filtered.length === 0 ? (
           <div style={s.empty}>{t('noMatch')}</div>
         ) : (
-          filtered.map(p => (
-            <div key={p.id} style={s.productCard}>
-              <div style={s.productTop}>
-                <div style={s.productMeta}>
-                  <span style={s.productName}>{p.name}</span>
-                  {p.category && <span style={s.pill}>{p.category}</span>}
-                  <span style={s.meta}>€{p.costPrice.toFixed(2)} {t('cost')} · €{p.sellingPrice.toFixed(2)} {t('sell')}</span>
-                  {p.lowStockThreshold > 0 && (
-                    <span style={s.meta}>{t('alertAt')} {p.lowStockThreshold} {t('units')}</span>
-                  )}
+          filtered.map(p => {
+            const isCollapsed = !!collapsedProducts[p.id]
+            return (
+              <div key={p.id} style={s.productCard}>
+                <div style={s.productTop}>
+                  <div style={s.productMeta}>
+                    {p.imageUrl && (
+                      <img src={p.imageUrl} style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)', flexShrink: 0 }} />
+                    )}
+                    <span style={s.productName}>{p.name}</span>
+                    {p.category && <span style={s.pill}>{p.category}</span>}
+                    <span style={s.meta}>€{p.costPrice.toFixed(2)} {t('cost')} · €{p.sellingPrice.toFixed(2)} {t('sell')}</span>
+                    {p.lowStockThreshold > 0 && (
+                      <span style={s.meta}>{t('alertAt')} {p.lowStockThreshold} {t('units')}</span>
+                    )}
+                  </div>
+                  <div style={s.productActions}>
+                    <span style={s.stockBadge}>{p.totalStock} {t('units')}</span>
+                    <button style={s.ghostSmall} onClick={() => editingProduct === p.id ? setEditingProduct(null) : startEdit(p)}>
+                      {editingProduct === p.id ? t('cancel') : 'Edit'}
+                    </button>
+                    <button style={s.ghostSmall} onClick={() => duplicateProduct(p.id)} disabled={duplicating === p.id}>
+                      {duplicating === p.id ? t('duplicating') : t('duplicate')}
+                    </button>
+                    <button style={s.dangerBtn} onClick={() => deleteProduct(p.id)}>{t('delete')}</button>
+                    <button
+                      style={s.collapseBtn}
+                      onClick={() => toggleCollapse(p.id)}
+                      title={isCollapsed ? 'Expand variants' : 'Collapse variants'}
+                    >
+                      {isCollapsed ? <ChevronRight /> : <ChevronDown />}
+                    </button>
+                  </div>
                 </div>
-                <div style={s.productActions}>
-                  <span style={s.stockBadge}>{p.totalStock} {t('units')}</span>
-                  <button style={s.ghostSmall} onClick={() => duplicateProduct(p.id)} disabled={duplicating === p.id}>
-                    {duplicating === p.id ? t('duplicating') : t('duplicate')}
-                  </button>
-                  <button style={s.dangerBtn} onClick={() => deleteProduct(p.id)}>{t('delete')}</button>
-                </div>
-              </div>
 
-              <table style={s.table}>
-                <thead>
-                  <tr>
-                    {[t('colorCol'), t('sizeCol'), t('barcodeId'), t('stock'), ''].map(h => (
-                      <th key={h} style={s.th}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {p.variants.map(v => (
-                    <tr key={v.id}>
-                      <td style={s.td}>{v.color}</td>
-                      <td style={s.td}><span style={s.pill}>{v.size}</span></td>
-                      <td style={s.td}><code style={s.code}>{v.barcodeId}</code></td>
-                      <td style={s.td}>
-                        <div style={s.qtyCtrl}>
-                          <button style={s.qtyBtn} onClick={() => adjustStock(v.id, -1)}>−</button>
-                          <span style={s.qtyVal}>{v.quantity}</span>
-                          <button style={s.qtyBtn} onClick={() => adjustStock(v.id, 1)}>+</button>
+                {editingProduct === p.id && (
+                  <div style={s.editForm}>
+                    <div style={s.editGrid}>
+                      <div>
+                        <label style={s.label}>{t('name')} *</label>
+                        <input style={s.input} value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label style={s.label}>{t('category')}</label>
+                        <input style={s.input} value={editForm.category} onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label style={s.label}>{t('costPrice')}</label>
+                        <input style={s.input} type="number" step="0.01" value={editForm.costPrice} onChange={e => setEditForm(f => ({ ...f, costPrice: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label style={s.label}>{t('sellingPrice')}</label>
+                        <input style={s.input} type="number" step="0.01" value={editForm.sellingPrice} onChange={e => setEditForm(f => ({ ...f, sellingPrice: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label style={s.label}>{t('imageUrl')}</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ fontSize: '13px', color: 'var(--text2)' }}
+                            onChange={async e => {
+                              const file = e.target.files[0]
+                              if (!file) return
+                              const url = await uploadImage(file)
+                              setEditForm(f => ({ ...f, imageUrl: url }))
+                            }}
+                          />
+                          {editForm.imageUrl && (
+                            <img src={editForm.imageUrl} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border)' }} />
+                          )}
                         </div>
-                      </td>
-                      <td style={s.td}>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button style={s.ghostSmall} onClick={() => setHistoryVariant(v)}>{t('history')}</button>
-                          <button style={s.ghostSmall} onClick={() => client.delete(`/variants/${v.id}`).then(load)}>{t('remove')}</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))
+                      </div>
+                      <div>
+                        <label style={s.label}>{t('notes')}</label>
+                        <input style={s.input} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
+                      <input
+                        type="checkbox"
+                        checked={editForm.lowStockThreshold !== null && editForm.lowStockThreshold > 0}
+                        onChange={e => setEditForm(f => ({ ...f, lowStockThreshold: e.target.checked ? 3 : null }))}
+                      />
+                      <span style={{ fontSize: '13px', color: 'var(--text2)' }}>{t('alertWhenStock')}</span>
+                      {editForm.lowStockThreshold > 0 && (
+                        <input
+                          style={{ ...s.input, width: '70px' }}
+                          type="number" min="0" max="100"
+                          value={editForm.lowStockThreshold}
+                          onChange={e => setEditForm(f => ({ ...f, lowStockThreshold: parseInt(e.target.value) || 0 }))}
+                        />
+                      )}
+                    </div>
+                    <div style={{ marginTop: '12px' }}>
+                      <button style={s.btnPrimary} onClick={() => saveEdit(p.id)} disabled={editSaving}>
+                        {editSaving ? t('saving') : t('saveProduct')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!isCollapsed && (
+                  <>
+                    <table style={s.table}>
+                      <thead>
+                        <tr>
+                          {[t('colorCol'), t('sizeCol'), t('barcodeId'), t('stock'), ''].map(h => (
+                            <th key={h} style={s.th}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {p.variants.map(v => (
+                          <tr key={v.id}>
+                            <td style={s.td}>{v.color}</td>
+                            <td style={s.td}><span style={s.pill}>{v.size}</span></td>
+                            <td style={s.td}><code style={s.code}>{v.barcodeId}</code></td>
+                            <td style={s.td}>
+                              <div style={s.qtyCtrl}>
+                                <button style={s.qtyBtn} onClick={() => adjustStock(v.id, -1)}>−</button>
+                                <span style={s.qtyVal}>{v.quantity}</span>
+                                <button style={s.qtyBtn} onClick={() => adjustStock(v.id, 1)}>+</button>
+                              </div>
+                            </td>
+                            <td style={s.td}>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button style={s.ghostSmall} onClick={() => setHistoryVariant(v)}>{t('history')}</button>
+                                <button style={s.ghostSmall} onClick={() => client.delete(`/variants/${v.id}`).then(load)}>{t('remove')}</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+
+                        {addingVariant === p.id && (
+                          <tr>
+                            <td style={s.td}>
+                              <input style={s.input} placeholder="Color" value={newVariant.color} onChange={e => setNewVariant(f => ({ ...f, color: e.target.value }))} />
+                            </td>
+                            <td style={s.td}>
+                              <select style={s.input} value={newVariant.size} onChange={e => setNewVariant(f => ({ ...f, size: e.target.value }))}>
+                                {SIZES.map(sz => <option key={sz}>{sz}</option>)}
+                              </select>
+                            </td>
+                            <td style={s.td}>
+                              <input style={{ ...s.input, width: '80px' }} type="number" min="0" placeholder="Qty" value={newVariant.initialQuantity} onChange={e => setNewVariant(f => ({ ...f, initialQuantity: e.target.value }))} />
+                            </td>
+                            <td style={s.td} colSpan={2}>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button style={s.btnPrimary} onClick={() => saveNewVariant(p.id)}>Save</button>
+                                <button style={s.ghostSmall} onClick={() => setAddingVariant(null)}>{t('cancel')}</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+
+                    {addingVariant !== p.id && (
+                      <button style={{ ...s.btnGhost, marginTop: '10px', fontSize: '12px' }} onClick={() => { setAddingVariant(p.id); setNewVariant({ color: '', size: 'S', initialQuantity: 0 }) }}>
+                        + {t('addVariant')}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })
         )}
       </div>
 
@@ -368,6 +643,7 @@ const s = {
   productActions: { display: 'flex', gap: '8px', alignItems: 'center' },
   stockBadge: { padding: '4px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '20px', fontSize: '12px', fontWeight: '500', color: 'var(--text2)' },
   dangerBtn: { padding: '5px 12px', background: 'transparent', border: '1px solid #f8717133', borderRadius: '6px', fontSize: '12px', color: 'var(--danger)' },
+  collapseBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text3)', cursor: 'pointer', flexShrink: 0 },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
   th: { textAlign: 'left', padding: '6px 10px', fontSize: '11px', color: 'var(--text3)', borderBottom: '1px solid var(--border)', textTransform: 'uppercase', letterSpacing: '0.4px' },
   td: { padding: '9px 10px', borderBottom: '1px solid var(--border)' },
@@ -376,4 +652,6 @@ const s = {
   qtyBtn: { width: '24px', height: '24px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text)', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   qtyVal: { fontWeight: '500', minWidth: '24px', textAlign: 'center', color: 'var(--text)' },
   ghostSmall: { padding: '4px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '5px', fontSize: '12px', color: 'var(--text3)' },
+  editForm: { background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' },
+  editGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' },
 }
