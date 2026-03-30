@@ -5,8 +5,18 @@ import Toast from '../components/Toast'
 import HistoryModal from '../components/HistoryModal'
 import { useLanguage } from '../context/LanguageContext'
 
-const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size']
-const emptyVariant = () => ({ color: '', size: 'S', initialQuantity: 0 })
+const SIZES_TOP = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size']
+const SIZES_PANTS = ['29', '30', '31', '32', '33', '34', '36', '38']
+const SIZES_SHOES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']
+const ALL_SIZES = [...SIZES_TOP, ...SIZES_PANTS, ...SIZES_SHOES.filter(s => !SIZES_PANTS.includes(s))]
+
+function sizesForType(type) {
+  if (type === 'pants') return SIZES_PANTS
+  if (type === 'shoes') return SIZES_SHOES
+  return SIZES_TOP
+}
+
+const emptyVariant = (type = 'top') => ({ color: '', size: sizesForType(type)[0], initialQuantity: 0 })
 
 function ChevronDown() {
   return (
@@ -28,8 +38,8 @@ export default function Products() {
   const [products, setProducts] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
-    name: '', category: '', costPrice: '', sellingPrice: '',
-    imageUrl: '', notes: '', lowStockThreshold: null, variants: [emptyVariant()]
+    name: '', category: '', productType: 'top', costPrice: '', sellingPrice: '',
+    imageUrl: '', notes: '', lowStockThreshold: null, variants: [emptyVariant('top')]
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -45,6 +55,7 @@ export default function Products() {
   const [addingVariant, setAddingVariant] = useState(null)
   const [newVariant, setNewVariant] = useState({ color: '', size: 'S', initialQuantity: 0 })
   const [collapsedProducts, setCollapsedProducts] = useState({})
+  const [selectedProducts, setSelectedProducts] = useState(new Set())
   const { t } = useLanguage()
 
   function addToast(message, type) {
@@ -57,6 +68,32 @@ export default function Products() {
 
   function toggleCollapse(id) {
     setCollapsedProducts(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  function toggleSelectProduct(id) {
+    setSelectedProducts(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll(filteredProducts) {
+    const allSelected = filteredProducts.every(p => selectedProducts.has(p.id))
+    if (allSelected) {
+      setSelectedProducts(prev => {
+        const next = new Set(prev)
+        filteredProducts.forEach(p => next.delete(p.id))
+        return next
+      })
+    } else {
+      setSelectedProducts(prev => {
+        const next = new Set(prev)
+        filteredProducts.forEach(p => next.add(p.id))
+        return next
+      })
+    }
   }
 
   async function load() {
@@ -94,7 +131,7 @@ export default function Products() {
         variants: form.variants.map(v => ({ ...v, initialQuantity: parseInt(v.initialQuantity) || 0 })),
       })
       setShowForm(false)
-      setForm({ name: '', category: '', costPrice: '', sellingPrice: '', imageUrl: '', notes: '', lowStockThreshold: null, variants: [emptyVariant()] })
+      setForm({ name: '', category: '', productType: 'top', costPrice: '', sellingPrice: '', imageUrl: '', notes: '', lowStockThreshold: null, variants: [emptyVariant('top')] })
       load()
       addToast(t('productSaved'), 'success')
     } catch {
@@ -170,10 +207,10 @@ export default function Products() {
       })
       setAddingVariant(null)
       setNewVariant({ color: '', size: 'S', initialQuantity: 0 })
-      addToast('Variant added.', 'success')
+      addToast(t('variantAdded'), 'success')
       load()
     } catch {
-      addToast('Failed to add variant.', 'error')
+      addToast(t('failedVariant'), 'error')
     }
   }
 
@@ -221,7 +258,8 @@ export default function Products() {
       'Tax - "IVA" (21%)'
     ]
     const rows = [headers]
-    products.forEach(p => {
+    const toExport = selectedProducts.size > 0 ? products.filter(p => selectedProducts.has(p.id)) : products
+    toExport.forEach(p => {
       p.variants.forEach(v => {
         rows.push([
           p.id,
@@ -281,7 +319,9 @@ export default function Products() {
       <div style={s.pageHeader}>
         <h2 style={s.title}>{t('products')}</h2>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button style={s.btnGhost} onClick={exportLoyverseCSV}>{t('exportLoyverseCSV')}</button>
+          <button style={s.btnGhost} onClick={exportLoyverseCSV}>
+            {selectedProducts.size > 0 ? `${t('exportLoyverseCSV')} (${selectedProducts.size})` : t('exportLoyverseCSV')}
+          </button>
           <button style={s.btnGhost} onClick={exportCSV}>{t('exportCSV')}</button>
           <button style={showForm ? s.btnGhost : s.btnPrimary} onClick={() => setShowForm(v => !v)}>
             {showForm ? t('cancel') : t('addProduct')}
@@ -318,6 +358,23 @@ export default function Products() {
                 <input style={s.input} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
                 <label style={s.label}>{t('category')}</label>
                 <input style={s.input} value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
+                <label style={s.label}>{t('productType')}</label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[['top', t('typeTop')], ['pants', t('typePants')], ['shoes', t('typeShoes')]].map(([type, label]) => (
+                    <button
+                      key={type}
+                      type="button"
+                      style={form.productType === type ? s.typeBtnActive : s.typeBtn}
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        productType: type,
+                        variants: f.variants.map(v => ({ ...v, size: sizesForType(type)[0] }))
+                      }))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <div style={s.row2}>
                   <div style={{ flex: 1 }}>
                     <label style={s.label}>{t('costPrice')}</label>
@@ -382,40 +439,55 @@ export default function Products() {
               </div>
               {form.variants.map((v, i) => (
                 <div key={i} style={s.variantRow}>
-                  <input style={s.input} placeholder="e.g. Blue" value={v.color} onChange={e => updateVariant(i, 'color', e.target.value)} />
+                  <input style={s.input} placeholder={t('colorPlaceholder')} value={v.color} onChange={e => updateVariant(i, 'color', e.target.value)} />
                   <select style={s.input} value={v.size} onChange={e => updateVariant(i, 'size', e.target.value)}>
-                    {SIZES.map(sz => <option key={sz}>{sz}</option>)}
+                    {sizesForType(form.productType).map(sz => <option key={sz}>{sz}</option>)}
                   </select>
                   <input style={s.input} type="number" min="0" value={v.initialQuantity} onChange={e => updateVariant(i, 'initialQuantity', e.target.value)} />
                   <button type="button" style={s.removeBtn} onClick={() => setForm(f => ({ ...f, variants: f.variants.filter((_, j) => j !== i) }))}>×</button>
                 </div>
               ))}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
-                <button type="button" style={s.btnGhost} onClick={() => setForm(f => ({ ...f, variants: [...f.variants, emptyVariant()] }))}>
+                <button type="button" style={s.btnGhost} onClick={() => setForm(f => ({ ...f, variants: [...f.variants, emptyVariant(f.productType)] }))}>
                   {t('addVariant')}
                 </button>
-                <button type="button" style={s.btnGhost} onClick={() => {
-                  const lastVariant = form.variants[form.variants.length - 1]
-                  const color = lastVariant?.color || ''
-                  const existingVariants = lastVariant?.size === 'S' && lastVariant?.color === '' ? form.variants.slice(0, -1) : form.variants
-                  const targetSizes = ['S', 'M', 'L', 'XL']
-                  const existingSizes = existingVariants.filter(v => v.color === color).map(v => v.size)
-                  const newVariants = targetSizes.filter(size => !existingSizes.includes(size)).map(size => ({ color, size, initialQuantity: 0 }))
-                  setForm(f => ({ ...f, variants: [...existingVariants, ...newVariants] }))
-                }}>
-                  {t('generate4')}
-                </button>
-                <button type="button" style={s.btnGhost} onClick={() => {
-                  const lastVariant = form.variants[form.variants.length - 1]
-                  const color = lastVariant?.color || ''
-                  const existingVariants = lastVariant?.size === 'S' && lastVariant?.color === '' ? form.variants.slice(0, -1) : form.variants
-                  const targetSizes = ['S', 'M', 'L', 'XL', 'XXL']
-                  const existingSizes = existingVariants.filter(v => v.color === color).map(v => v.size)
-                  const newVariants = targetSizes.filter(size => !existingSizes.includes(size)).map(size => ({ color, size, initialQuantity: 0 }))
-                  setForm(f => ({ ...f, variants: [...existingVariants, ...newVariants] }))
-                }}>
-                  {t('generate5')}
-                </button>
+                {form.productType === 'top' && (<>
+                  <button type="button" style={s.btnGhost} onClick={() => {
+                    const lastVariant = form.variants[form.variants.length - 1]
+                    const color = lastVariant?.color || ''
+                    const existingVariants = lastVariant?.size === 'S' && lastVariant?.color === '' ? form.variants.slice(0, -1) : form.variants
+                    const targetSizes = ['S', 'M', 'L', 'XL']
+                    const existingSizes = existingVariants.filter(v => v.color === color).map(v => v.size)
+                    const newVariants = targetSizes.filter(size => !existingSizes.includes(size)).map(size => ({ color, size, initialQuantity: 0 }))
+                    setForm(f => ({ ...f, variants: [...existingVariants, ...newVariants] }))
+                  }}>
+                    {t('generate4')}
+                  </button>
+                  <button type="button" style={s.btnGhost} onClick={() => {
+                    const lastVariant = form.variants[form.variants.length - 1]
+                    const color = lastVariant?.color || ''
+                    const existingVariants = lastVariant?.size === 'S' && lastVariant?.color === '' ? form.variants.slice(0, -1) : form.variants
+                    const targetSizes = ['S', 'M', 'L', 'XL', 'XXL']
+                    const existingSizes = existingVariants.filter(v => v.color === color).map(v => v.size)
+                    const newVariants = targetSizes.filter(size => !existingSizes.includes(size)).map(size => ({ color, size, initialQuantity: 0 }))
+                    setForm(f => ({ ...f, variants: [...existingVariants, ...newVariants] }))
+                  }}>
+                    {t('generate5')}
+                  </button>
+                </>)}
+                {(form.productType === 'pants' || form.productType === 'shoes') && (
+                  <button type="button" style={s.btnGhost} onClick={() => {
+                    const lastVariant = form.variants[form.variants.length - 1]
+                    const color = lastVariant?.color || ''
+                    const existingVariants = lastVariant?.color === '' && !sizesForType(form.productType).includes(lastVariant?.size) ? form.variants.slice(0, -1) : form.variants
+                    const targetSizes = sizesForType(form.productType)
+                    const existingSizes = existingVariants.filter(v => v.color === color).map(v => v.size)
+                    const newVariants = targetSizes.filter(size => !existingSizes.includes(size)).map(size => ({ color, size, initialQuantity: 0 }))
+                    setForm(f => ({ ...f, variants: [...existingVariants, ...newVariants] }))
+                  }}>
+                    {t('generateAllSizes')}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -435,10 +507,28 @@ export default function Products() {
         ) : filtered.length === 0 ? (
           <div style={s.empty}>{t('noMatch')}</div>
         ) : (
-          filtered.map(p => {
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', paddingLeft: '2px' }}>
+              <button
+                style={filtered.length > 0 && filtered.every(p => selectedProducts.has(p.id)) ? s.circleChecked : s.circleUnchecked}
+                onClick={() => toggleSelectAll(filtered)}
+                title={t('selectAll')}
+              />
+              <span style={{ fontSize: '12px', color: 'var(--text3)' }}>
+                {selectedProducts.size > 0 ? `${selectedProducts.size} ${t('selected')}` : t('selectAll')}
+              </span>
+            </div>
+            {filtered.map(p => {
             const isCollapsed = !!collapsedProducts[p.id]
+            const isSelected = selectedProducts.has(p.id)
             return (
-              <div key={p.id} style={s.productCard}>
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+              <button
+                style={isSelected ? s.circleChecked : s.circleUnchecked}
+                onClick={() => toggleSelectProduct(p.id)}
+                title={t('selectProduct')}
+              />
+              <div style={{ ...s.productCard, flex: 1, marginBottom: 0 }}>
                 <div style={s.productTop}>
                   <div style={s.productMeta}>
                     {p.imageUrl && (
@@ -454,7 +544,7 @@ export default function Products() {
                   <div style={s.productActions}>
                     <span style={s.stockBadge}>{p.totalStock} {t('units')}</span>
                     <button style={s.ghostSmall} onClick={() => editingProduct === p.id ? setEditingProduct(null) : startEdit(p)}>
-                      {editingProduct === p.id ? t('cancel') : 'Edit'}
+                      {editingProduct === p.id ? t('cancel') : t('edit')}
                     </button>
                     <button style={s.ghostSmall} onClick={() => duplicateProduct(p.id)} disabled={duplicating === p.id}>
                       {duplicating === p.id ? t('duplicating') : t('duplicate')}
@@ -463,7 +553,7 @@ export default function Products() {
                     <button
                       style={s.collapseBtn}
                       onClick={() => toggleCollapse(p.id)}
-                      title={isCollapsed ? 'Expand variants' : 'Collapse variants'}
+                      title={isCollapsed ? t('expandVariants') : t('collapseVariants')}
                     >
                       {isCollapsed ? <ChevronRight /> : <ChevronDown />}
                     </button>
@@ -572,19 +662,19 @@ export default function Products() {
                         {addingVariant === p.id && (
                           <tr>
                             <td style={s.td}>
-                              <input style={s.input} placeholder="Color" value={newVariant.color} onChange={e => setNewVariant(f => ({ ...f, color: e.target.value }))} />
+                              <input style={s.input} placeholder={t('color')} value={newVariant.color} onChange={e => setNewVariant(f => ({ ...f, color: e.target.value }))} />
                             </td>
                             <td style={s.td}>
                               <select style={s.input} value={newVariant.size} onChange={e => setNewVariant(f => ({ ...f, size: e.target.value }))}>
-                                {SIZES.map(sz => <option key={sz}>{sz}</option>)}
+                                {ALL_SIZES.map(sz => <option key={sz}>{sz}</option>)}
                               </select>
                             </td>
                             <td style={s.td}>
-                              <input style={{ ...s.input, width: '80px' }} type="number" min="0" placeholder="Qty" value={newVariant.initialQuantity} onChange={e => setNewVariant(f => ({ ...f, initialQuantity: e.target.value }))} />
+                              <input style={{ ...s.input, width: '80px' }} type="number" min="0" placeholder={t('qty')} value={newVariant.initialQuantity} onChange={e => setNewVariant(f => ({ ...f, initialQuantity: e.target.value }))} />
                             </td>
                             <td style={s.td} colSpan={2}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button style={s.btnPrimary} onClick={() => saveNewVariant(p.id)}>Save</button>
+                                <button style={s.btnPrimary} onClick={() => saveNewVariant(p.id)}>{t('save')}</button>
                                 <button style={s.ghostSmall} onClick={() => setAddingVariant(null)}>{t('cancel')}</button>
                               </div>
                             </td>
@@ -601,8 +691,10 @@ export default function Products() {
                   </>
                 )}
               </div>
+              </div>
             )
-          })
+          })}
+          </>
         )}
       </div>
 
@@ -654,4 +746,8 @@ const s = {
   ghostSmall: { padding: '4px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '5px', fontSize: '12px', color: 'var(--text3)' },
   editForm: { background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' },
   editGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' },
+  circleUnchecked: { width: '18px', height: '18px', minWidth: '18px', borderRadius: '50%', border: '2px solid var(--border)', background: 'transparent', cursor: 'pointer', padding: 0, flexShrink: 0 },
+  circleChecked: { width: '18px', height: '18px', minWidth: '18px', borderRadius: '50%', border: '2px solid var(--accent)', background: 'var(--accent)', cursor: 'pointer', padding: 0, flexShrink: 0 },
+  typeBtn: { padding: '6px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', fontSize: '13px', color: 'var(--text2)', cursor: 'pointer' },
+  typeBtnActive: { padding: '6px 14px', background: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: '7px', fontSize: '13px', color: '#111', fontWeight: '600', cursor: 'pointer' },
 }

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:developer.loyverse.com)",
-      "WebFetch(domain:api.loyverse.com)"
+      "WebFetch(domain:api.loyverse.com)",
+      "Bash(wc -l /c/Users/cebete/Documents/Flawls.Client/src/pages/*.jsx /c/Users/cebete/Documents/Flawls.Client/src/components/*.jsx)"
     ]
   }
 }
